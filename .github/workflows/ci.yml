@@ -1,0 +1,27 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.10'}
+      - run: pip install pytest numpy && python -m pytest -q test
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [humble, jazzy]
+    container: ros:${{ matrix.distro }}-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: colcon build + test
+        shell: bash
+        run: |
+          apt-get update -qq && apt-get install -y -qq python3-numpy python3-pytest python3-colcon-common-extensions
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          mkdir -p /tmp/ws/src && cp -r "$GITHUB_WORKSPACE" /tmp/ws/src/percept_doctor && cd /tmp/ws
+          colcon build --packages-select percept_doctor
+          source install/setup.bash && ros2 run percept_doctor percept_doctor --version
+          cd src/percept_doctor && python3 -m pytest -q test
