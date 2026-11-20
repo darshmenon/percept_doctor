@@ -56,6 +56,8 @@ Version 0.1.0. 11 unit tests of the checks, plus end-to-end runs:
 - **UR3 Gazebo sim** (head and wrist cameras, depth, point clouds, 7 streams): reads healthy. Pausing the sim made all 7 streams `STREAM_STALE` with a growing silence time, and they returned to healthy after the resume.
 - That run found a false positive that is now fixed: noiseless simulated cameras on a still scene deliver bit-identical frames (81 frames, 1 distinct image) with advancing stamps. That is `IMAGE_STATIC`, a warning; only a repeating stamp is `IMAGE_FROZEN`.
 
-Not tested: a real camera or depth sensor on hardware, and ROS 2 Jazzy locally (CI builds it). Run it on your own sensors and report what it gets wrong.
+- **Real webcam** (a laptop USB camera bridged with `test/webcam_bridge.py`, about 26 Hz): reads healthy over 581 frames, with no false `IMAGE_STATIC` or `IMAGE_FROZEN`, which confirms real sensor noise keeps those checks quiet. A covered or dark lens was not tried.
 
-Build: `colcon build --packages-select percept_doctor`. Tests: `python3 -m pytest test` (no ROS needed). Try it without a robot: `python3 test/fake_camera.py [--dark|--frozen|--no-info|--stop-after N]`.
+Not tested: a depth sensor or RealSense on hardware, and ROS 2 Jazzy locally (CI builds it). Run it on your own sensors and report what it gets wrong.
+
+Build: `colcon build --packages-select percept_doctor`. Tests: `python3 -m pytest test` (no ROS needed). Try it without a robot: `python3 test/fake_camera.py [--dark|--frozen|--no-info|--stop-after N]`, or on a real webcam: `python3 test/webcam_bridge.py --seconds 30` (publishes `/cam/image_raw`, writes nothing to disk).

@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `test/webcam_bridge.py` publishes a local webcam to ROS. Run on a real USB webcam: healthy over 581 frames (about 26 Hz), no false static or frozen findings.
+
 ## 0.1.0
 - First version: camera, depth and point cloud health for a running ROS 2 robot. Read-only.
 - Checks: `NO_SENSORS`, `STREAM_NONE`, `STREAM_STALE`, `LOW_RATE`, `STREAM_LAG`, `IMAGE_DARK`, `IMAGE_FLAT`, `IMAGE_SATURATED`, `IMAGE_FROZEN`, `DEPTH_POOR`, `DEPTH_DEAD`, `CLOUD_EMPTY`, `NO_CAMERA_INFO`.
