@@ -33,8 +33,8 @@ ERROR [IMAGE_FROZEN] /cam/image_raw delivers identical frames (10+ in a row): th
 | `LOW_RATE` | warn | a live stream runs below 5 Hz |
 | `STREAM_LAG` | warn | messages arrive more than 0.5 s after their header stamp (ignored under sim time) |
 | `IMAGE_DARK` / `IMAGE_FLAT` / `IMAGE_SATURATED` | warn | very dark, no contrast (covered lens or blank), or blown out |
-| `IMAGE_FROZEN` | error | ten or more identical frames with an identical header stamp: the driver is stuck |
-| `IMAGE_STATIC` | warn | identical frames while the stamps advance: a still scene on a noiseless simulated camera, or a driver re-stamping a stale frame |
+| `IMAGE_FROZEN` | error | ten or more identical frames with an identical stamp, **or** identical frames while the stamps keep advancing on a real clock: the pixels are frozen but the driver keeps stamping (seen on ZED X). Real sensors always have noise |
+| `IMAGE_STATIC` | warn | identical frames while the stamps advance, **only when a simulator drives time** (`/clock` is live or stamps are sim time): normal for a still scene on a noiseless simulated camera |
 | `DEPTH_POOR` / `DEPTH_DEAD` | warn / error | under 20% or under 1% of depth pixels are valid |
 | `CLOUD_EMPTY` | error | the point cloud has zero points |
 | `NO_CAMERA_INFO` | warn | image streams are live but no `camera_info` exists |
@@ -54,10 +54,10 @@ Version 0.1.0. 11 unit tests of the checks, plus end-to-end runs:
 
 - **Fake camera:** healthy, dark, frozen, no `camera_info`, silent each gave the expected finding.
 - **UR3 Gazebo sim** (head and wrist cameras, depth, point clouds, 7 streams): reads healthy. Pausing the sim made all 7 streams `STREAM_STALE` with a growing silence time, and they returned to healthy after the resume.
-- That run found a false positive that is now fixed: noiseless simulated cameras on a still scene deliver bit-identical frames (81 frames, 1 distinct image) with advancing stamps. That is `IMAGE_STATIC`, a warning; only a repeating stamp is `IMAGE_FROZEN`.
+- That run found a false positive: noiseless simulated cameras on a still scene deliver bit-identical frames (81 frames, 1 distinct image) with advancing stamps. A first fix downgraded it everywhere, which would have missed a real freeze (a [ZED X report](https://community.stereolabs.com/t/zed-x-camera-publishes-frozen-stale-image-frames-indefinitely-requires-node-restart-to-recover/11118) shows stamps and `camera_info` advancing while the pixels repeat). The check now tells sim from real: identical frames are `IMAGE_STATIC` (warn) only when `/clock` is live or stamps are sim time, and `IMAGE_FROZEN` (error) on a real clock. Verified with a fake camera in both modes (`test/fake_camera.py --frozen` and `--frozen --sim`) and the real webcam stays quiet.
 
 - **Real webcam** (a laptop USB camera bridged with `test/webcam_bridge.py`, about 26 Hz): reads healthy over 581 frames, with no false `IMAGE_STATIC` or `IMAGE_FROZEN`, which confirms real sensor noise keeps those checks quiet. A covered or dark lens was not tried.
 
 Not tested: a depth sensor or RealSense on hardware, and ROS 2 Jazzy locally (CI builds it). Run it on your own sensors and report what it gets wrong.
 
-Build: `colcon build --packages-select percept_doctor`. Tests: `python3 -m pytest test` (no ROS needed). Try it without a robot: `python3 test/fake_camera.py [--dark|--frozen|--no-info|--stop-after N]`, or on a real webcam: `python3 test/webcam_bridge.py --seconds 30` (publishes `/cam/image_raw`, writes nothing to disk).
+Build: `colcon build --packages-select percept_doctor`. Tests: `python3 -m pytest test` (no ROS needed). Try it without a robot: `python3 test/fake_camera.py [--dark|--frozen|--no-info|--stop-after N|--sim]`, or on a real webcam: `python3 test/webcam_bridge.py --seconds 30` (publishes `/cam/image_raw`, writes nothing to disk).

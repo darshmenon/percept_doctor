@@ -42,6 +42,7 @@ class State:
     streams: dict = field(default_factory=dict)       # topic -> Stream
     advertised: dict = field(default_factory=dict)    # topic -> kind, seen on the graph (may never deliver)
     info_topics: set = field(default_factory=set)     # camera_info topics seen (published or received)
+    sim_time: bool = False                            # a simulator drives time (/clock is live, or stamps are sim time)
 
 
 @dataclass
@@ -81,8 +82,10 @@ def image_stats(data, height, width, step, encoding):
     return {'valid': float(valid.mean()), 'sig': sig}
 
 
-def feed(s, topic, kind, now, stamp=None, stats=None, points=None, header_stamp=None):
+def feed(s, topic, kind, now, stamp=None, stats=None, points=None, header_stamp=None, sim=False):
     st = s.streams.setdefault(topic, Stream(topic, kind))
+    if sim:
+        s.sim_time = True
     st.first = now if st.first is None else st.first
     st.last = now
     st.times.append(now)
@@ -155,9 +158,13 @@ def evaluate(s, now, c=Config()):
                 if len(stamps) >= c.frozen_frames and len(set(stamps)) == 1:
                     f.append(Finding(ERROR, 'IMAGE_FROZEN', f'{st.name} delivers identical frames with an identical stamp '
                                      f'({c.frozen_frames}+ in a row): the camera driver is stuck'))
+                elif s.sim_time:
+                    f.append(Finding(WARN, 'IMAGE_STATIC', f'{st.name} delivers identical frames while its stamps advance: '
+                                     'normal for a still scene on a noiseless simulated camera'))
                 else:
-                    f.append(Finding(WARN, 'IMAGE_STATIC', f'{st.name} delivers identical frames while its stamps advance: a still scene '
-                                     'on a noiseless simulated camera, or a driver re-stamping a stale frame'))
+                    f.append(Finding(ERROR, 'IMAGE_FROZEN', f'{st.name} delivers identical frames ({c.frozen_frames}+ in a row) '
+                                     'while its stamps keep advancing: the pixels are frozen but the driver keeps stamping '
+                                     '(a real sensor always has noise)'))
         elif st.kind == 'cloud':
             pts = [d['points'] for d in recent if 'points' in d]
             if pts and max(pts) == 0:
@@ -180,8 +187,8 @@ HINTS = {
     'IMAGE_FLAT': 'remove the lens cap, check exposure and that the camera is not facing a blank surface',
     'IMAGE_DARK': 'raise exposure/gain or add light; check auto-exposure is on',
     'IMAGE_SATURATED': 'lower exposure/gain or avoid direct light into the lens',
-    'IMAGE_STATIC': 'in simulation this is normal for a still scene; on a real camera, restart the driver (real sensors always have noise)',
-    'IMAGE_FROZEN': 'restart the camera driver; a stuck pipeline keeps republishing the last frame',
+    'IMAGE_STATIC': 'normal in simulation for a still scene; if this is not a simulator, check that /clock is not being published by mistake',
+    'IMAGE_FROZEN': 'restart the camera driver; a stuck pipeline keeps republishing the last frame, often with fresh stamps (seen on ZED X)',
     'DEPTH_POOR': 'check the working range, reflective or transparent surfaces and the IR projector',
     'DEPTH_DEAD': 'check the sensor is not blocked or too close, and the depth stream is enabled in the driver',
     'CLOUD_EMPTY': 'check the depth source and the cloud filter limits (range, voxel size, crop box)',

@@ -29,6 +29,7 @@ def main(argv=None):
     import rclpy
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
+    from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import Image, PointCloud2
 
     ap = argparse.ArgumentParser(description=__doc__)
@@ -50,24 +51,33 @@ def main(argv=None):
     s = State(t0=now())
     prefix = ('/' + args.ns.strip('/')) if args.ns else ''
     subscribed = {}
+    clock_seen = {'t': None}
+
+    def clock_live():
+        return clock_seen['t'] is not None and now() - clock_seen['t'] < 2.0
+
+    node.create_subscription(Clock, '/clock', lambda m: clock_seen.update(t=now()), qos_profile_sensor_data)
 
     def stamp_of(header):
+        """(stamp for the lag check or None, True when the stamp is sim time)."""
         st = header.stamp.sec + header.stamp.nanosec / 1e9
         if st <= 0:
-            return None
+            return None, False
         lag = node.get_clock().now().nanoseconds / 1e9 - st
-        return now() - lag if abs(lag) < 1e4 else None    # sim-time stamps: no usable lag
+        return (now() - lag, False) if abs(lag) < 1e4 else (None, True)    # sim-time stamps: no usable lag
 
     def on_image(topic):
         def cb(m):
             stats = image_stats(m.data, m.height, m.width, m.step, m.encoding)
-            feed(s, topic, 'image', now(), stamp=stamp_of(m.header), stats=stats,
+            stamp, sim = stamp_of(m.header)
+            feed(s, topic, 'image', now(), stamp=stamp, stats=stats, sim=sim or clock_live(),
                  header_stamp=m.header.stamp.sec + m.header.stamp.nanosec / 1e9)
         return cb
 
     def on_cloud(topic):
         def cb(m):
-            feed(s, topic, 'cloud', now(), stamp=stamp_of(m.header), points=m.width * m.height)
+            stamp, sim = stamp_of(m.header)
+            feed(s, topic, 'cloud', now(), stamp=stamp, points=m.width * m.height, sim=sim or clock_live())
         return cb
 
     def discover():
