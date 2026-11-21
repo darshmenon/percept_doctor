@@ -16,6 +16,7 @@ def main():
     ap.add_argument('--dark', action='store_true')
     ap.add_argument('--frozen', action='store_true')
     ap.add_argument('--no-info', action='store_true')
+    ap.add_argument('--depth', action='store_true', help='publish a 16UC1 depth image that is mostly invalid (zeros)')
     ap.add_argument('--sim', action='store_true', help='drive time like a simulator: publish /clock and sim-time stamps')
     ap.add_argument('--stop-after', type=float, default=0.0)
     ap.add_argument('--hz', type=float, default=15.0)
@@ -34,7 +35,12 @@ def main():
             continue
         if not a.frozen:
             frame = rng.normal(8 if a.dark else 120, 3 if a.dark else 40, (96, 128, 3)).clip(0, 255).astype(np.uint8)
-        m = Image(height=96, width=128, encoding='rgb8', step=128 * 3, data=frame.tobytes())
+        if a.depth:
+            d = rng.integers(500, 3000, (96, 128)).astype(np.uint16)
+            d[rng.random((96, 128)) < 0.9] = 0
+            m = Image(height=96, width=128, encoding='16UC1', step=128 * 2, data=d.tobytes())
+        else:
+            m = Image(height=96, width=128, encoding='rgb8', step=128 * 3, data=frame.tobytes())
         if a.sim:
             sim_t = time.time() - t0 + 5.0
             m.header.stamp.sec, m.header.stamp.nanosec = int(sim_t), int((sim_t % 1) * 1e9)

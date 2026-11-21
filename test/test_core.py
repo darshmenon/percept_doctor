@@ -173,3 +173,92 @@ def test_feed_marks_sim_time():
     s = State(t0=0.0)
     feed(s, '/a', 'image', 1.0, sim=True)
     assert s.sim_time is True
+
+
+# ---- image_stats: encodings, padding, bad buffers -------------------------------------------------
+
+def test_image_stats_supported_encodings():
+    for enc, ch, dtype in [('rgb8', 3, np.uint8), ('bgr8', 3, np.uint8), ('rgba8', 4, np.uint8), ('bgra8', 4, np.uint8),
+                           ('mono8', 1, np.uint8), ('8UC1', 1, np.uint8)]:
+        a = np.full((20, 30, ch), 100, dtype)
+        st = image_stats(a.tobytes(), 20, 30, 30 * ch, enc)
+        assert st and abs(st['mean'] - 100) < 1e-3 and st['std'] < 1e-3, enc
+
+
+def test_image_stats_ignores_row_padding():
+    a = np.full((10, 16), 50, np.uint8)
+    padded = np.pad(a, ((0, 0), (0, 8)), constant_values=255)          # 8 junk bytes per row
+    st = image_stats(padded.tobytes(), 10, 16, 24, 'mono8')
+    assert abs(st['mean'] - 50) < 1e-3 and st['sat'] == 0.0
+
+
+def test_image_stats_depth_validity_for_16bit_and_float():
+    d16 = np.zeros((10, 10), np.uint16); d16[:, :5] = 1000
+    assert abs(image_stats(d16.tobytes(), 10, 10, 20, '16UC1')['valid'] - 0.5) < 1e-6
+    d32 = np.full((10, 10), np.nan, np.float32); d32[:3] = 1.5
+    assert abs(image_stats(d32.tobytes(), 10, 10, 40, '32FC1')['valid'] - 0.3) < 1e-6   # NaN counts as invalid
+    inf = np.full((4, 4), np.inf, np.float32)
+    assert image_stats(inf.tobytes(), 4, 4, 16, '32FC1')['valid'] == 0.0
+
+
+def test_image_stats_rejects_what_it_cannot_read():
+    assert image_stats(b'\x00' * 10, 10, 10, 10, 'bayer_rggb8') is None        # unsupported encoding
+    assert image_stats(b'', 0, 10, 10, 'mono8') is None                          # zero height
+    assert image_stats(b'', 10, 0, 10, 'mono8') is None                          # zero width
+    assert image_stats(b'\x00' * 50, 10, 10, 10, 'mono8') is None                # buffer shorter than height * step
+    assert image_stats(b'\x00' * 100, 10, 10, 5, 'mono8') is None                # step narrower than the row
+
+
+def test_image_stats_same_pixels_same_signature_and_one_pixel_changes_it():
+    a = np.random.default_rng(1).integers(0, 255, (48, 64), dtype=np.uint8)
+    b = a.copy(); b[0, 0] ^= 1
+    s1 = image_stats(a.tobytes(), 48, 64, 64, 'mono8')['sig']
+    assert s1 == image_stats(a.tobytes(), 48, 64, 64, 'mono8')['sig']
+    assert s1 != image_stats(b.tobytes(), 48, 64, 64, 'mono8')['sig']
+
+
+def test_sensor_kind_and_depth_like():
+    from percept_doctor.core import depth_like, sensor_kind
+    assert sensor_kind('sensor_msgs/msg/Image') == 'image'
+    assert sensor_kind('sensor_msgs/msg/PointCloud2') == 'cloud'
+    assert sensor_kind('sensor_msgs/msg/LaserScan') is None
+    assert depth_like('16UC1') and depth_like('32FC1') and depth_like('mono16') and not depth_like('rgb8')
+
+
+# ---- output formatting (no ROS needed) -----------------------------------------------------------
+
+def test_fmt_and_json_output_shape():
+    import json
+    from percept_doctor.core import Finding
+    from percept_doctor.doctor import fmt, to_json
+    f = [Finding('ERROR', 'STREAM_STALE', '/cam silent'), Finding('WARN', 'NO_CAMERA_INFO', 'no info')]
+    text = fmt(f, hints=True)
+    assert 'ERROR [STREAM_STALE] /cam silent' in text and '->' in text
+    assert '->' not in fmt(f, hints=False)
+    j = json.loads(to_json(f, '/cam', 123.0))
+    assert j['ok'] is False and j['ns'] == '/cam' and {x['code'] for x in j['findings']} == {'STREAM_STALE', 'NO_CAMERA_INFO'}
+    assert all(x['hint'] for x in j['findings'])
+    assert json.loads(to_json([Finding('WARN', 'NO_CAMERA_INFO', 'x')], '', 1.0))['ok'] is True
+
+
+# ---- timing edge cases ----------------------------------------------------------------------------
+
+def test_stream_that_stops_mid_run_goes_stale_then_recovers():
+    s = State(t0=0.0)
+    end = live_image(s, 5.0)
+    assert 'STREAM_STALE' not in codes(evaluate(s, end + 0.5))
+    assert 'STREAM_STALE' in codes(evaluate(s, end + 10.0))
+    for i in range(20):
+        t = end + 10.0 + i * 0.1
+        feed(s, '/cam/image_raw', 'image', t, stamp=t, stats=image_stats(*rgb(seed=100 + i)), header_stamp=t)
+    assert 'STREAM_STALE' not in codes(evaluate(s, end + 12.0))
+
+
+def test_every_finding_code_has_a_hint_and_a_known_level():
+    from percept_doctor.core import HINTS
+    src = open(__import__('percept_doctor.core', fromlist=['x']).__file__).read()
+    import re
+    for code in set(re.findall(r"'([A-Z]+(?:_[A-Z]+)+)'", src)):
+        if code in ('CLOUD_EMPTY', 'DEPTH_DEAD', 'DEPTH_POOR', 'IMAGE_DARK', 'IMAGE_FLAT', 'IMAGE_FROZEN', 'IMAGE_SATURATED',
+                    'IMAGE_STATIC', 'LOW_RATE', 'NO_CAMERA_INFO', 'NO_SENSORS', 'STREAM_LAG', 'STREAM_NONE', 'STREAM_STALE'):
+            assert HINTS.get(code), code
