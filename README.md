@@ -41,6 +41,17 @@ ERROR [IMAGE_FROZEN] /cam/image_raw delivers identical frames (10+ in a row): th
 
 Thresholds are the defaults in `Config` (`core.py`); `--grace`, `--stale` and `--min-rate` change the common ones.
 
+## Per-robot baselines
+
+A camera that is healthy at 15 Hz on one robot may be struggling at 15 Hz on another. Record normal once, then get warned on drift:
+
+```bash
+percept_doctor --learn 60 --baseline-file my_robot.json     # on healthy sensors: writes each stream's normal rate
+percept_doctor --baseline --baseline-file my_robot.json     # later: RATE_DROP / RATE_SPIKE below half or above double normal
+```
+
+The rate is the median messages per second: plain statistics, no model. A silent stream is still `STREAM_STALE`, not a rate finding.
+
 ## Limits
 
 - Image statistics come from a small subsample (about 48 x 64 pixels), so it is cheap, but it cannot see a small defect.

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+- Per-robot baselines: `--learn SECS` records each stream's normal message rate, `--baseline` warns with `RATE_DROP` / `RATE_SPIKE` below half or above double that. Plain statistics, no model. Run live against the fake camera (learn at 15 Hz, quiet at 15 Hz, `RATE_DROP` at 6 Hz).
 - Fix: `IMAGE_FROZEN` is an error again for identical frames with advancing stamps on a **real** clock (a ZED X freeze looks exactly like that). `IMAGE_STATIC` (warn) is now only for simulators: `/clock` live or sim-time stamps. 14 unit tests; fake camera verified in both modes; real webcam stays quiet. `test/fake_camera.py --sim` drives sim time.
 - `test/webcam_bridge.py` publishes a local webcam to ROS. Run on a real USB webcam: healthy over 581 frames (about 26 Hz), no false static or frozen findings.
 

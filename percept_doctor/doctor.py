@@ -41,14 +41,23 @@ def main(argv=None):
     ap.add_argument('--min-rate', type=float, default=Config.min_rate, help='Hz below which a stream is slow')
     ap.add_argument('--json', action='store_true', help='print one JSON object per report')
     ap.add_argument('--hints', action='store_true', help='print a suggested next step under each finding')
+    ap.add_argument('--learn', type=float, default=0.0, metavar='SECS',
+                    help='watch healthy sensors for SECS, write each stream\'s normal rate to --baseline-file, exit')
+    ap.add_argument('--baseline-file', default='percept_baseline.json', help='where --learn writes, and --baseline reads')
+    ap.add_argument('--baseline', action='store_true', help='also flag streams far slower or faster than the learned baseline')
     ap.add_argument('--once', type=float, default=0.0, help='watch N seconds, print one report, exit 1 on any ERROR')
     args, ros_args = ap.parse_known_args(argv)
+    if args.learn:
+        args.once = args.learn
 
     rclpy.init(args=ros_args)
     node = Node('percept_doctor')
     cfg = Config(grace=args.grace, stale=args.stale, min_rate=args.min_rate)
     now = time.monotonic
     s = State(t0=now())
+    if args.baseline:
+        from percept_doctor import baseline as bl
+        s.baseline = bl.load(args.baseline_file)
     prefix = ('/' + args.ns.strip('/')) if args.ns else ''
     subscribed = {}
     clock_seen = {'t': None}
@@ -109,6 +118,13 @@ def main(argv=None):
         return found
 
     def tick():
+        if args.learn:
+            from percept_doctor import baseline as bl
+            learned = bl.learn({k: v.times for k, v in s.streams.items()})
+            bl.save(learned, args.baseline_file)
+            print(f'learned {len(learned)} streams -> {args.baseline_file}: ' +
+                  ', '.join(f'{k} {v["hz"]:g} Hz' for k, v in sorted(learned.items())), flush=True)
+            raise SystemExit(0)
         found = report()
         if args.once:
             exit_code['v'] = 1 if any(x.level == 'ERROR' for x in found) else 0

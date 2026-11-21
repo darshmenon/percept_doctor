@@ -29,7 +29,7 @@ class Stream:
     kind: str                                   # image | depth | cloud
     first: float = None
     last: float = None
-    times: deque = field(default_factory=lambda: deque(maxlen=300))
+    times: deque = field(default_factory=lambda: deque(maxlen=4000))   # arrival times; long enough for --learn
     lags: deque = field(default_factory=lambda: deque(maxlen=300))     # (t, lag s)
     stats: deque = field(default_factory=lambda: deque(maxlen=300))    # (t, dict)
     sigs: deque = field(default_factory=lambda: deque(maxlen=64))      # frame signatures
@@ -42,6 +42,7 @@ class State:
     streams: dict = field(default_factory=dict)       # topic -> Stream
     advertised: dict = field(default_factory=dict)    # topic -> kind, seen on the graph (may never deliver)
     info_topics: set = field(default_factory=set)     # camera_info topics seen (published or received)
+    baseline: dict = None                             # learned per-stream rates (baseline.py), or None
     sim_time: bool = False                            # a simulator drives time (/clock is live, or stamps are sim time)
 
 
@@ -122,6 +123,10 @@ def evaluate(s, now, c=Config()):
         if topic not in s.streams and late:
             f.append(Finding(ERROR, 'STREAM_NONE', f'{kind} topic {topic} is advertised but no message ever arrived '
                              '(driver up but not publishing, or a QoS mismatch)'))
+    if s.baseline:
+        from percept_doctor import baseline as bl
+        f.extend(Finding(lv, code, msg) for lv, code, msg in bl.check(s.baseline, {k: v.times for k, v in s.streams.items()}, now)
+                 if now - s.streams[msg.split()[0]].last <= c.stale)
     for st in live:
         age = now - st.last
         if age > c.stale:
@@ -179,6 +184,8 @@ def evaluate(s, now, c=Config()):
 
 
 HINTS = {
+    'RATE_DROP': 'a stream is much slower than this robot\'s learned normal: check USB bandwidth, CPU load or a throttled driver; re-learn with --learn if the change is intended',
+    'RATE_SPIKE': 'a stream is much faster than this robot\'s learned normal: a duplicate publisher or a changed driver setting; re-learn with --learn if intended',
     'NO_SENSORS': 'check ROS_DOMAIN_ID and the namespace; `ros2 topic list -t | grep -E "Image|PointCloud2"`',
     'STREAM_NONE': 'the topic exists but nothing arrives: check the driver log and that your QoS is best_effort for sensor data',
     'STREAM_STALE': 'driver or bridge stopped: restart it, check USB/bandwidth, and in sim check the bridge is not paused',

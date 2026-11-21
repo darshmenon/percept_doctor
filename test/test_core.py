@@ -262,3 +262,29 @@ def test_every_finding_code_has_a_hint_and_a_known_level():
         if code in ('CLOUD_EMPTY', 'DEPTH_DEAD', 'DEPTH_POOR', 'IMAGE_DARK', 'IMAGE_FLAT', 'IMAGE_FROZEN', 'IMAGE_SATURATED',
                     'IMAGE_STATIC', 'LOW_RATE', 'NO_CAMERA_INFO', 'NO_SENSORS', 'STREAM_LAG', 'STREAM_NONE', 'STREAM_STALE'):
             assert HINTS.get(code), code
+
+
+# ---- per-robot baselines ----------------------------------------------------------------------------
+
+def test_baseline_flags_a_slow_stream_against_this_robots_normal():
+    from percept_doctor import baseline as bl
+    s = State(t0=0.0)
+    live_image(s, 20.0, hz=30)
+    s.baseline = bl.learn({k: v.times for k, v in s.streams.items()})
+    assert abs(s.baseline['/cam/image_raw']['hz'] - 30) < 1.5
+    assert not codes(evaluate(s, 20.0)) & {'RATE_DROP', 'RATE_SPIKE'}          # at normal rate: quiet
+    live_image(s, 30.0, hz=8)                                                   # still above min_rate 5, far below 30
+    s.streams['/cam/image_raw'].times = type(s.streams['/cam/image_raw'].times)(
+        [t for t in s.streams['/cam/image_raw'].times if t >= 21.0], maxlen=4000)
+    found = evaluate(s, 29.9)
+    assert 'RATE_DROP' in codes(found) and 'LOW_RATE' not in codes(found)
+    assert HINTS['RATE_DROP'] and HINTS['RATE_SPIKE']
+
+
+def test_baseline_ignores_a_silent_stream():
+    from percept_doctor import baseline as bl
+    s = State(t0=0.0)
+    end = live_image(s, 20.0, hz=30)
+    s.baseline = bl.learn({k: v.times for k, v in s.streams.items()})
+    found = codes(evaluate(s, end + 10.0))
+    assert 'STREAM_STALE' in found and 'RATE_DROP' not in found

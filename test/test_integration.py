@@ -13,21 +13,35 @@ CAM = os.path.join(os.path.dirname(__file__), 'fake_camera.py')
 _domain = [160]
 
 
-def run(cam_args, watch=7.0, extra=()):
+def run(cam_args, watch=7.0, extra=(), learn=False):
     """Start the fake camera on a private domain, run the doctor with --once, return (exit code, {code: level})."""
     _domain[0] += 1
     env = dict(os.environ, ROS_DOMAIN_ID=str(_domain[0]), ROS_LOCALHOST_ONLY='1')
     cam = subprocess.Popen([sys.executable, CAM, *cam_args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         time.sleep(1.5)
-        p = subprocess.run([sys.executable, '-m', 'percept_doctor.doctor', '--once', str(watch), '--json', *extra],
+        p = subprocess.run([sys.executable, '-m', 'percept_doctor.doctor', *(['--once', str(watch)] if not learn else []), *([] if learn else ['--json']), *extra],
                            env=env, cwd=ROOT, capture_output=True, text=True, timeout=60)
     finally:
         cam.terminate()
         cam.wait(timeout=10)
+    if learn:
+        assert p.returncode == 0 and 'learned' in p.stdout, p.stdout + p.stderr
+        return p.returncode, {}
     lines = [json.loads(x) for x in p.stdout.splitlines() if x.startswith('{')]
     assert lines, p.stdout + p.stderr
     return p.returncode, {f['code']: f['level'] for f in lines[-1]['findings']}
+
+
+def test_learn_then_baseline_flags_a_slowed_camera(tmp_path):
+    f = str(tmp_path / 'base.json')
+    run([], watch=9.0, extra=['--learn', '9', '--baseline-file', f], learn=True)
+    learned = json.load(open(f))['streams']
+    assert 10 < learned['/cam/image_raw']['hz'] < 20, learned
+    rc, found = run([], extra=['--baseline', '--baseline-file', f])
+    assert not {'RATE_DROP', 'RATE_SPIKE'} & set(found), found
+    rc, found = run(['--hz', '6'], extra=['--baseline', '--baseline-file', f])
+    assert 'RATE_DROP' in found and 'LOW_RATE' not in found, found
 
 
 def test_healthy_camera_exits_zero():
