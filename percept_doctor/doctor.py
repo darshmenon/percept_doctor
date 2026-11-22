@@ -44,6 +44,8 @@ def main(argv=None):
     ap.add_argument('--learn', type=float, default=0.0, metavar='SECS',
                     help='watch healthy sensors for SECS, write each stream\'s normal rate to --baseline-file, exit')
     ap.add_argument('--baseline-file', default='percept_baseline.json', help='where --learn writes, and --baseline reads')
+    ap.add_argument('--expect', action='append', default=[], metavar='STREAM:HZ',
+                    help='expected rate, e.g. --expect color:30 (repeatable); no --learn needed, overrides a learned value')
     ap.add_argument('--baseline', action='store_true', help='also flag streams far slower or faster than the learned baseline')
     ap.add_argument('--once', type=float, default=0.0, help='watch N seconds, print one report, exit 1 on any ERROR')
     args, ros_args = ap.parse_known_args(argv)
@@ -57,7 +59,18 @@ def main(argv=None):
     s = State(t0=now())
     if args.baseline:
         from percept_doctor import baseline as bl
-        s.baseline = bl.load(args.baseline_file)
+        try:
+            s.baseline = bl.load(args.baseline_file)
+        except ValueError as e:
+            ap.error(str(e))
+    if args.expect:
+        from percept_doctor import baseline as bl
+        try:
+            expected = bl.parse_expect(args.expect)
+        except ValueError as e:
+            ap.error(str(e))
+        s.baseline = {**(s.baseline or {}), **expected}
+        print('[percept_doctor] expecting rates: ' + ', '.join(f'{k}={v["hz"]:g} Hz' for k, v in sorted(expected.items())))
     prefix = ('/' + args.ns.strip('/')) if args.ns else ''
     subscribed = {}
     clock_seen = {'t': None}
